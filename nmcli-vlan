@@ -1,0 +1,184 @@
+#!/bin/bash
+#
+# version: 1.0.0
+# date: 20241204
+
+if ! [ "$(whoami)" == root ]
+then
+  SUDO_CMD="sudo"
+fi
+
+usage() {
+  echo "USAGE: ${0} create <vlan_name> <vlan_id> <parent_interface> <ip_address/CIDR>"
+  echo "       ${0} delete <vlan_name>"
+  echo "       ${0} show"
+}
+
+set_global_vars() {
+  if [ -z ${1} ]
+  then
+    echo
+    echo "ERROR: You must supply an action."
+    echo
+    usage
+    echo
+    exit
+  else
+    case ${1} in
+      create)
+        ACTION=${1}
+      ;;
+      delete)
+        ACTION=${1}
+      ;;
+      show)
+        ACTION=${1}
+      ;;
+      *)
+        echo
+        echo "ERROR: The action must be one of the following: create, delete, show"
+        echo
+        echo
+        usage
+        exit
+      ;;
+    esac
+  fi
+
+  case ${ACTION} in
+    create|delete)
+      if [ -z ${2} ]
+      then
+        echo
+        if [ ${ACTION} == create ]
+        then
+          echo "ERROR: You must supply a VLAN name, VLAN ID and parent interface."
+        fi
+        if [ ${ACTION} == delete ]
+        then
+          echo "ERROR: You must supply a VLAN device name."
+        fi
+        echo
+        exit
+      else
+        if [ ${ACTION} == create ]
+        then
+          VLAN_NAME=${2}
+        fi
+        if [ ${ACTION} == delete ]
+        then
+          VLAN_NAME=${2}
+        fi
+        echo
+      fi
+    ;;
+  esac
+
+  case ${ACTION} in
+    create) 
+      if ! [ -z ${3} ]
+      then
+        VLAN_ID=${3}
+      else
+        echo
+        echo "ERROR: You must supply a VLAN ID."
+        echo
+        exit
+      fi
+
+      if ! [ -z ${4} ]
+      then
+        if nmcli device | grep -q ${4} 2>&1
+        then
+          VLAN_PARENT=${4}
+        else
+          echo
+          echo "ERROR: The specified parent interface (${4}) does not seem to exist."
+          echo 
+          echo "Available interfaces:"
+          echo "---------------------"
+          nmcli --fields DEVICE,TYPE device | grep -v vlan | grep -v loopback
+          echo
+          exit
+        fi
+      else
+        echo
+        echo "ERROR: You must supply a parent interface."
+        echo
+        exit
+      fi
+
+      if ! [ -z ${5} ]
+      then
+        if ! echo ${5} | grep -q /
+        then
+          echo
+          echo "ERROR: The IP address must contain a CIDR netmask."
+          echo "       Example: 192.168.1.1/24"
+          echo
+          exit
+        else
+          IP_ADDRESS=${5}
+        fi
+      fi
+    ;;
+  esac
+}
+
+create() {
+  local VLAN=${1}
+  local VLANID=${2}
+  local PARENT=${3}
+  local IP=${4}
+
+  if ! [ -z ${IP} ]
+  then
+    #echo "${SUDO_CMD} nmcli con add con-name ${VLAN} type vlan dev ${PARENT} id ${VLANID} ip4 ${IP}"
+    ${SUDO_CMD} nmcli con add con-name ${VLAN} type vlan dev ${PARENT} id ${VLANID} ip4 ${IP}
+  else
+    #echo "${SUDO_CMD} nmcli con add con-name ${VLAN} type vlan dev ${PARENT} id ${VLANID}"
+    ${SUDO_CMD} nmcli con add con-name ${VLAN} type vlan dev ${PARENT} id ${VLANID}
+  fi
+}
+
+delete() {
+  local VLAN=${1}
+  local VLANDEV="$(nmcli con show | grep ${VLAN} | awk '{ print $4 }')"
+
+  #echo "${SUDO_CMD} nmcli device del ${VLANDEV}"
+  if nmcli device | grep -q ${VLANDEV}
+  then
+    ${SUDO_CMD} nmcli device del ${VLANDEV}
+  fi
+
+  if nmcli con show | grep -q ${VLAN}
+  then
+    ${SUDO_CMD} nmcli con del ${VLAN}
+  fi
+}
+
+show() {
+  ${SUDO_CMD} nmcli con show | grep -E '(TYPE|vlan)'
+  echo "-----------------------------------------------------------------------------"
+  ${SUDO_CMD} nmcli device | grep -E '(DEVICE|vlan)'
+}
+
+main() {
+  set_global_vars ${*}
+
+  case ${ACTION} in
+    create)
+      create ${VLAN_NAME} ${VLAN_ID} ${VLAN_PARENT} ${IP_ADDRESS}
+    ;;
+    delete)
+      delete ${VLAN_NAME}
+    ;;
+    show)
+      show
+    ;;
+  esac
+}
+
+############################################################
+
+main ${*}

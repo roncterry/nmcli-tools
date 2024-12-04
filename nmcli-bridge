@@ -1,0 +1,158 @@
+#!/bin/bash
+#
+# version: 1.0.0
+# date: 20241204
+
+if ! [ "$(whoami)" == root ]
+then
+  SUDO_CMD="sudo"
+fi
+
+usage() {
+  echo "USAGE: ${0} create <bridge_name> <ip_address/CIDR> <bridge_slave_interface_name>"
+  echo "       ${0} delete <bridge_name>"
+  echo "       ${0} show"
+}
+
+set_global_vars() {
+  if [ -z ${1} ]
+  then
+    echo
+    echo "ERROR: You must supply an action."
+    echo
+    usage
+    echo
+    exit
+  else
+    case ${1} in
+      create)
+        ACTION=${1}
+      ;;
+      delete)
+        ACTION=${1}
+      ;;
+      show)
+        ACTION=${1}
+      ;;
+      *)
+        echo
+        echo "ERROR: The action must be one of the following: create, delete, show"
+        echo
+        echo
+        usage
+        exit
+      ;;
+    esac
+  fi
+
+  case ${ACTION} in
+    create|delete)
+      if [ -z ${2} ]
+      then
+        echo
+        if [ ${ACTION} == create ]
+        then
+          echo "ERROR: You must supply a bridge name."
+        fi
+        if [ ${ACTION} == delete ]
+        then
+          echo "ERROR: You must supply a bridge name."
+        fi
+        echo
+        exit
+      else
+        BRIDGE_NAME=${2}
+      fi
+    ;;
+  esac
+
+  case ${ACTION} in
+    create) 
+      if ! [ -z ${3} ]
+      then
+        if ! echo ${3} | grep -q /
+        then
+          echo
+          echo "ERROR: The IP address must contain a CIDR netmask."
+          echo "       Example: 192.168.1.1/24"
+          echo
+          exit
+        else
+          IP_ADDRESS=${3}
+        fi
+      fi
+
+      if ! [ -z ${4} ]
+      then
+        if nmcli device | grep -q ${4} 2>&1
+        then
+          BRIDGE_SLAVE_NAME=${4}
+        else
+          echo
+          echo "ERROR: The specified slave interface (${4}) does not seem to exist."
+          echo 
+          echo "Available interfaces:"
+          echo "---------------------"
+          nmcli --fields DEVICE,TYPE device | grep -v bridge | grep -v loopback
+          echo
+          exit
+        fi
+      fi
+    ;;
+  esac
+}
+
+create() {
+  local BRIDGE=${1}
+  local IP=${2}
+  local SLAVE=${3}
+
+  if ! [ -z ${IP} ]
+  then
+    if ! [ -z ${SLAVE} ]
+    then
+      ${SUDO_CMD} nmcli con add con-name ${BRIDGE} type bridge ifname ${BRIDGE} ip4 ${IP}
+      ${SUDO_CMD} nmcli con add con-name ${BRIDGE}-slave-${SLAVE} type bridge-slave ifname ${SLAVE} master ${BRIDGE}
+    else
+      ${SUDO_CMD} nmcli con add con-name ${BRIDGE} type bridge ifname ${BRIDGE} ip4 ${IP}
+    fi
+  else
+    ${SUDO_CMD} nmcli con add con-name ${BRIDGE} type bridge ifname ${BRIDGE}
+  fi
+}
+
+delete() {
+  local BRIDGE=${1}
+  local SLAVE_LIST="$(nmcli con show | grep ${BRIDGE}-slave- | awk '{ print $1 }')"
+
+  ${SUDO_CMD} nmcli con del ${BRIDGE}
+  for SLAVE in ${SLAVE_LIST}
+  do
+    ${SUDO_CMD} nmcli con del ${SLAVE}
+  done
+}
+
+show() {
+  ${SUDO_CMD} nmcli con show | grep -E '(TYPE|bridge)' | grep -v bridge-slave
+  ${SUDO_CMD} nmcli con show | grep slave
+}
+
+main() {
+  set_global_vars ${*}
+
+  case ${ACTION} in
+    create)
+      create ${BRIDGE_NAME} ${IP_ADDRESS} ${BRIDGE_SLAVE_NAME}
+    ;;
+    delete)
+      delete ${BRIDGE_NAME}
+    ;;
+    show)
+      show
+    ;;
+  esac
+}
+
+############################################################
+
+main ${*}
